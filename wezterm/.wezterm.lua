@@ -24,14 +24,14 @@ config.background = {
   },
   -- The image, scaled to cover the window without distortion.
   {
-    source = { File = "/Users/neset/Pictures/wezterm-banner.jpeg" },
+    source = { File = "/Users/neset/Pictures/wezterm-banner-dim.jpeg" },
     width = "Cover",
     height = "Cover",
     horizontal_align = "Center",
     vertical_align = "Middle",
     repeat_x = "NoRepeat",
     repeat_y = "NoRepeat",
-    hsb = { brightness = 0.20, hue = 1.0, saturation = 0.85 },
+    hsb = { brightness = 1.0, hue = 1.0, saturation = 1.0 },
   },
 }
 -- and finally, return the configuration to wezterm
