@@ -8,6 +8,8 @@ local config = wezterm.config_builder()
 
 -- For example, changing the color scheme:
 
+config.front_end = "WebGpu"
+
 config.enable_tab_bar = false
 config.font = wezterm.font("JetBrainsMono Nerd Font")
 -- Opaque window: the desktop behind WezTerm does not show through.
