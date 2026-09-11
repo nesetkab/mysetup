@@ -31,7 +31,7 @@ config.background = {
     vertical_align = "Middle",
     repeat_x = "NoRepeat",
     repeat_y = "NoRepeat",
-    hsb = { brightness = 0.35, hue = 1.0, saturation = 1.0 },
+    hsb = { brightness = 0.12, hue = 1.0, saturation = 0.4 },
   },
 }
 -- and finally, return the configuration to wezterm
