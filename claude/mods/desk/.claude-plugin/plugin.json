@@ -1,0 +1,6 @@
+{
+  "name": "desk",
+  "version": "0.1.0",
+  "description": "Replaces the scrolling chat with a task sidebar and one task per page",
+  "author": { "name": "Neset" }
+}

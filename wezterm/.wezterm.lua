@@ -9,6 +9,7 @@ local config = wezterm.config_builder()
 -- For example, changing the color scheme:
 
 config.front_end = "WebGpu"
+config.color_scheme = "Tokyo Night Moon"
 
 config.enable_tab_bar = false
 config.font = wezterm.font("JetBrainsMono Nerd Font")
