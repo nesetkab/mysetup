@@ -5,8 +5,10 @@ return {
       {
         "<leader>cv",
         ft = "markdown",
-        "<cmd>RenderMarkdown preview<cr>",
-        desc = "Markdown Preview (Split)",
+        function()
+          require("mdpreview").toggle()
+        end,
+        desc = "Markdown Preview (Pane)",
       },
     },
   },

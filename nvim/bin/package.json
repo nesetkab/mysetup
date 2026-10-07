@@ -1,0 +1,8 @@
+{
+  "name": "mdpreview",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "marked": "^18.0.14"
+  }
+}
