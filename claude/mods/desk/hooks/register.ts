@@ -22,7 +22,6 @@ type Task = {
   turnIds: Set<string>
   narration: Set<string>
   answers: string[]
-  note: string
   isDone: boolean
   isAborted: boolean
   isOpen: boolean
@@ -35,6 +34,7 @@ const SKIPPED_STEPS = new Set(['TodoWrite', 'ToolSearch', 'TaskCreate', 'TaskUpd
 const KEPT_ROWS = new Set(['ExitPlanMode', 'EnterPlanMode'])
 const NO_CHANGE: Change = { added: 0, removed: 0 }
 const MAX_STEPS = 14
+const MAX_NOTES = 8
 const RESERVED_ROWS = 16
 const ICON_USER = '\uf007'
 const ICON_STEPS = '\uf0ca'
@@ -192,7 +192,6 @@ function createTask(prompt: string, startedAt: number): Task {
     turnIds: new Set(),
     narration: new Set(),
     answers: [],
-    note: '',
     isDone: false,
     isAborted: false,
     isOpen: false,
@@ -243,7 +242,7 @@ function rebuild(messages: any[]) {
   const finish = () => {
     if (!current) return
     for (const { text, index } of texts) {
-      if (index < lastToolIndex) current.narration.add(text)
+      if (index <= lastToolIndex) current.narration.add(text)
       else current.answers.push(text)
     }
   }
@@ -451,9 +450,31 @@ function foldLine($: any, elements: any, task: Task, columns: number) {
   })
 }
 
+function notes(elements: any, task: Task, width: number) {
+  const { Box, Text } = elements
+  const all = [...task.narration]
+  const shown = all.slice(-MAX_NOTES)
+  const earlier = all.length - shown.length
+  return [
+    ...(earlier > 0 ? [Text({ key: 'notes-earlier', color: COMMENT, children: [`${earlier} earlier`] })] : []),
+    ...shown.map((note, index) =>
+      Box({
+        key: `note-${earlier + index}`,
+        flexDirection: 'row',
+        columnGap: 1,
+        children: [
+          Text({ color: GUTTER, children: ['│'] }),
+          Text({ color: COMMENT, italic: true, children: [clip(note.replace(/\*\*|__|`/g, ''), width * 3)] }),
+        ],
+      }),
+    ),
+  ]
+}
+
 function conversation(elements: any, task: Task, width: number, now: number, withSteps: boolean) {
   const { Text, Markdown } = elements
   const answer = answerText(task)
+  const noteRows = notes(elements, task, width - 2)
   const status = !task.isDone
     ? 'working ' + formatDuration(now - task.startedAt)
     : task.isAborted
@@ -461,12 +482,18 @@ function conversation(elements: any, task: Task, width: number, now: number, wit
       : 'done' + (task.durationMs ? ' in ' + formatDuration(task.durationMs) : '')
   const reply = !task.isDone
     ? [
-        Text({ key: 'working', color: COMMENT, italic: true, children: [task.note ? clip(task.note, width * 3) : 'thinking…'] }),
+        ...(noteRows.length > 0 ? noteRows : [Text({ key: 'working', color: COMMENT, italic: true, children: ['thinking…'] })]),
         ...(withSteps ? outline(elements, task, width) : []),
       ]
-    : answer && fitsPage(task)
-      ? [Markdown({ key: 'answer', text: answer })]
-      : [Text({ key: 'answer-below', color: COMMENT, children: ['long answer, shown below'] })]
+    : [
+        ...noteRows,
+        ...(noteRows.length > 0 && answer ? [Text({ key: 'gap-answer', children: [' '] })] : []),
+        ...(!answer
+          ? []
+          : fitsPage(task)
+            ? [Markdown({ key: 'answer', text: answer })]
+            : [Text({ key: 'answer-below', color: COMMENT, children: ['long answer, shown below'] })]),
+      ]
   return [
     rule(elements, 'you', ICON_USER, 'you', MAGENTA, width),
     Text({ key: 'prompt', color: FG, children: [clip(task.prompt, 2000)] }),
@@ -515,7 +542,7 @@ function page($: any, e: any, task: Task, now: number) {
   }
 
   const side = [...outline(elements, task, sideWidth), ...gitPanel(elements, sideWidth)]
-  const height = Math.max(minHeight, side.length + 2, roughRows(task.prompt, mainWidth) + roughRows(answerText(task), mainWidth) + 6)
+  const height = Math.max(minHeight, side.length + 2, roughRows(task.prompt, mainWidth) + roughRows([...task.narration, answerText(task)].join('\n'), mainWidth - 2) + 6)
   return Box({
     flexDirection: 'row',
     marginTop: 1,
@@ -776,13 +803,30 @@ export const register: Register = (on) => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    const result = yield* next(e)
+    const stream = next(e)
     const task = tasks.find((one) => one.turnIds.has(e.turnId))
+    let streamed = ''
+    let block = -1
+    let live = ''
+    for await (const chunk of stream) {
+      if (task && chunk.kind === 'text') {
+        if (block !== -1 && chunk.index !== block) streamed += '\n\n'
+        block = chunk.index
+        streamed += chunk.text
+      }
+      if (task && chunk.kind === 'tool' && !live && streamed.trim()) {
+        live = streamed.trim()
+        task.narration.add(live)
+        redraw($)
+      }
+      yield chunk
+    }
+    const result = await stream.result
     const text = result.answer.trim()
+    if (live && live !== text) task?.narration.delete(live)
     if (task && text) {
       if (result.toolUses.length > 0) {
         task.narration.add(text)
-        task.note = firstLine(text, 200)
       } else {
         task.answers.push(text)
       }
