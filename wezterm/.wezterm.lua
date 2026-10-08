@@ -24,7 +24,29 @@ config.colors = {
     inactive_tab_hover = { bg_color = "#16161e", fg_color = "#a9b1d6" },
   },
 }
-config.font = wezterm.font("JetBrainsMono Nerd Font")
+local tab_icons = {
+  claude = { glyph = "\u{100000}\u{100001}", color = "#d77757" },
+  nvim = { glyph = "\u{f04b2}", color = "#c3e88d" },
+}
+
+wezterm.on("format-tab-title", function(tab, _, _, _, hover)
+  local path = (tab.active_pane.current_working_dir and tab.active_pane.current_working_dir.file_path or ""):gsub("/$", "")
+  local name = path == wezterm.home_dir and "\u{f02dc}" or (path:match("[^/]+$") or path)
+  local process = (tab.active_pane.foreground_process_name or ""):match("[^/]+$")
+  local icon = tab_icons[process]
+  local state = tab.is_active and "active_tab" or hover and "inactive_tab_hover" or "inactive_tab"
+  local colors = config.colors.tab_bar[state]
+  local items = { { Background = { Color = colors.bg_color } }, { Text = " " } }
+  if icon then
+    table.insert(items, { Foreground = { Color = icon.color } })
+    table.insert(items, { Text = icon.glyph .. " " })
+  end
+  table.insert(items, { Foreground = { Color = colors.fg_color } })
+  table.insert(items, { Text = name .. " " })
+  return items
+end)
+config.font_dirs = { wezterm.home_dir .. "/wowcode/mysetup/wezterm/fonts" }
+config.font = wezterm.font_with_fallback({ "JetBrainsMono Nerd Font", "Clawd" })
 -- Opaque window: the desktop behind WezTerm does not show through.
 config.window_background_opacity = 1.0
 

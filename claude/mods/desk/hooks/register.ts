@@ -22,6 +22,7 @@ type Task = {
   turnIds: Set<string>
   narration: Set<string>
   answers: string[]
+  followUps: string[]
   isDone: boolean
   isAborted: boolean
   isOpen: boolean
@@ -55,6 +56,8 @@ const ICON_UNFOLDED = '\uf47c'
 const FOLD_BG = '#2f334d'
 const VIEWED_BG = '#3e68d7'
 const ICON_VIEWED = '\uf061'
+const ICON_FOLLOW = '\u21b3'
+const ICON_CLAUDE = '\u{100000}\u{100001}'
 const FG = '#c8d3f5'
 const FG_DARK = '#828bb8'
 const COMMENT = '#636da6'
@@ -65,6 +68,7 @@ const MAGENTA = '#c099ff'
 const GREEN = '#c3e88d'
 const YELLOW = '#ffc777'
 const RED = '#ff757f'
+const CLAWD = '#d77757'
 const MARKDOWN_LIMIT = 9500
 
 let tasks: Task[] = []
@@ -98,6 +102,11 @@ function addChanges(x: Change, y: Change): Change {
 
 function clip(text: string, max: number) {
   return text.length > max ? text.slice(0, Math.max(1, max - 1)) + '…' : text
+}
+
+function shownPrompt(text: string) {
+  const collapsed = text.replace(/<pasted_content[^>]*>([\s\S]*?)<\/pasted_content[^>]*>/g, (_, body: string) => `[pasted ${plural(splitLines(body.trim()).length, 'line')}]`)
+  return clip(collapsed, 2000)
 }
 
 function firstLine(text: string, max: number) {
@@ -192,6 +201,7 @@ function createTask(prompt: string, startedAt: number): Task {
     turnIds: new Set(),
     narration: new Set(),
     answers: [],
+    followUps: [],
     isDone: false,
     isAborted: false,
     isOpen: false,
@@ -249,7 +259,11 @@ function rebuild(messages: any[]) {
   messages.forEach((message, index) => {
     const text = (message.text ?? '').trim()
     if (message.role === 'user') {
-      if (message.toolResults?.length || !text || text.startsWith('<')) return
+      if (!text || text.startsWith('<')) return
+      if (message.toolResults?.length) {
+        current?.followUps.push(text)
+        return
+      }
       finish()
       current = createTask(text, 0)
       current.isDone = true
@@ -323,6 +337,10 @@ function ownerOfPrompt(rowId: string, text: string) {
   return match ?? null
 }
 
+function ownerOfFollowUp(text: string) {
+  return [...tasks].reverse().find((task) => task.followUps.includes(text)) ?? null
+}
+
 function statusWord(task: Task, now: number) {
   if (!task.isDone) return 'working · ' + formatDuration(now - task.startedAt)
   if (task.isAborted) return 'stopped'
@@ -360,7 +378,7 @@ async function loadHistory($: any) {
   redraw($)
 }
 
-function rule(elements: any, key: string, icon: string, text: string, color: string, width: number, extra = '') {
+function rule(elements: any, key: string, icon: string, text: string, color: string, width: number, extra = '', iconColor = color) {
   const { Box, Text } = elements
   const head = `${icon} ${text}`
   const tail = extra ? ` ${extra} ` : ' '
@@ -368,9 +386,10 @@ function rule(elements: any, key: string, icon: string, text: string, color: str
     key,
     flexDirection: 'row',
     children: [
-      Text({ bold: true, color, children: [head] }),
+      Text({ color: iconColor, children: [icon + ' '] }),
+      Text({ bold: true, color, children: [text] }),
       Text({ color: COMMENT, children: [tail] }),
-      Text({ color: GUTTER, children: ['─'.repeat(Math.max(0, width - head.length - tail.length))] }),
+      Text({ color: GUTTER, children: ['─'.repeat(Math.max(0, width - [...head].length - tail.length))] }),
     ],
   })
 }
@@ -435,7 +454,7 @@ function foldLine($: any, elements: any, task: Task, columns: number) {
   const icon = isViewed ? ICON_VIEWED : task.isOpen ? ICON_UNFOLDED : ICON_FOLDED
   const meta = ` ${foldMeta(task)} `
   const room = Math.max(10, columns - meta.length - 10)
-  const label = `${icon} ${number}  ${clip(firstLine(task.prompt, 400), room)} `
+  const label = `${icon} ${number}  ${clip(firstLine(shownPrompt(task.prompt), 400), room)} `
   const dots = Math.max(1, columns - label.length - meta.length - 6)
   return Box({
     key: 'fold-' + task.id,
@@ -472,7 +491,7 @@ function notes(elements: any, task: Task, width: number) {
 }
 
 function conversation(elements: any, task: Task, width: number, now: number, withSteps: boolean) {
-  const { Text, Markdown } = elements
+  const { Box, Text, Markdown } = elements
   const answer = answerText(task)
   const noteRows = notes(elements, task, width - 2)
   const status = !task.isDone
@@ -496,9 +515,17 @@ function conversation(elements: any, task: Task, width: number, now: number, wit
       ]
   return [
     rule(elements, 'you', ICON_USER, 'you', MAGENTA, width),
-    Text({ key: 'prompt', color: FG, children: [clip(task.prompt, 2000)] }),
+    Text({ key: 'prompt', color: FG, children: [shownPrompt(task.prompt)] }),
+    ...task.followUps.map((text, index) =>
+      Box({
+        key: `follow-${index}`,
+        flexDirection: 'row',
+        columnGap: 1,
+        children: [Text({ color: MAGENTA, children: [ICON_FOLLOW] }), Text({ color: FG, children: [shownPrompt(text)] })],
+      }),
+    ),
     Text({ key: 'gap', children: [' '] }),
-    rule(elements, 'claude', '󰚩', 'claude', task.isDone ? (task.isAborted ? RED : BLUE) : YELLOW, width, status),
+    rule(elements, 'claude', ICON_CLAUDE, 'claude', task.isDone ? (task.isAborted ? RED : BLUE) : YELLOW, width, status, CLAWD),
     ...reply,
   ]
 }
@@ -542,7 +569,7 @@ function page($: any, e: any, task: Task, now: number) {
   }
 
   const side = [...outline(elements, task, sideWidth), ...gitPanel(elements, sideWidth)]
-  const height = Math.max(minHeight, side.length + 2, roughRows(task.prompt, mainWidth) + roughRows([...task.narration, answerText(task)].join('\n'), mainWidth - 2) + 6)
+  const height = Math.max(minHeight, side.length + 2, roughRows([task.prompt, ...task.followUps].map(shownPrompt).join('\n'), mainWidth) + roughRows([...task.narration, fitsPage(task) ? answerText(task) : ''].join('\n'), mainWidth - 2) + 6)
   return Box({
     flexDirection: 'row',
     marginTop: 1,
@@ -580,7 +607,7 @@ function statusline($: any, e: any, task: Task, now: number) {
         key: 'left',
         flexDirection: 'row',
         children: [
-          segment(elements, 'mode', ` 󰚩 ${word} `, BG_DARK, mode, true),
+          segment(elements, 'mode', ` ${ICON_CLAUDE} ${word} `, BG_DARK, mode, true),
           segment(elements, 'mode-sep', SEP_RIGHT, mode, GUTTER),
           segment(elements, 'steps', ` ${ICON_STEPS} ${stepCount(task)} `, BLUE, GUTTER),
           segment(elements, 'steps-sep', SEP_RIGHT, GUTTER),
@@ -785,8 +812,19 @@ export const register: Register = (on) => {
     return {}
   })
 
+  on('prompt.submit', async ($, e, next) => {
+    const task = e.turnId ? tasks.find((one) => one.turnIds.has(e.turnId!)) : null
+    const text = e.text.trim()
+    if (task && e.origin.kind === 'composer' && text) {
+      task.followUps.push(text)
+      redraw($)
+    }
+    return next(e)
+  })
+
   on('turn.start', async ($, e, next) => {
     if (e.text) {
+      for (const one of tasks) one.followUps = one.followUps.filter((text) => text !== e.text.trim())
       const task = createTask(e.text, await $.clock.now())
       task.turnIds.add(e.turnId)
       tasks.push(task)
@@ -910,8 +948,9 @@ export const register: Register = (on) => {
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     if (e.props.origin.kind !== 'composer' || e.props.isExpanded) return next(e)
-    const task = ownerOfPrompt(e.requestId, e.props.text.trim())
-    if (!task) return next(e)
+    const text = e.props.text.trim()
+    const task = ownerOfPrompt(e.requestId, text)
+    if (!task) return ownerOfFollowUp(text) ? hide($, e) : next(e)
     const now = await $.clock.now()
     if (task === latestTask()) return page($, e, viewedTask() ?? task, now)
     return task.isOpen ? openedFold($, e, task, now) : folded($, e, task)

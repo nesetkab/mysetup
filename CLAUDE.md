@@ -19,6 +19,7 @@ Everything follows Tokyo Night Moon on a transparent background with the JetBrai
 - nvim: LazyVim with `folke/tokyonight.nvim`, `transparent = true`.
 - WezTerm: `color_scheme = "Tokyo Night Moon"`, wallpaper in `wezterm/`, retro tab bar at the bottom.
 - New UI should match: Tokyo Night colors, Nerd Font icons, no solid panels or gradients.
+- Clawd, the orange Claude Code character, is a two-cell icon (`\u{100000}\u{100001}`) from `wezterm/fonts/Clawd.ttf`, loaded through `font_dirs`. Rebuild it with `python3 wezterm/fonts/clawd.py`. Never write the `.ttf` in place while WezTerm is running: it reads fonts straight from the file and crashes. The script writes a new file and swaps it in.
 
 ## Claude Code mod: `claude/mods/desk`
 
