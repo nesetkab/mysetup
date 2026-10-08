@@ -37,6 +37,8 @@ const NO_CHANGE: Change = { added: 0, removed: 0 }
 const MAX_STEPS = 14
 const MAX_NOTES = 8
 const RESERVED_ROWS = 16
+const DOCK_ROWS = 4
+const SIDE_COLUMNS = 110
 const ICON_USER = '\uf007'
 const ICON_STEPS = '\uf0ca'
 const ICON_FILES = '\uf07c'
@@ -553,19 +555,14 @@ function page($: any, e: any, task: Task, now: number) {
   const { Box, Text } = elements
   const columns = (e.viewport?.columns ?? 100) - 2
   const rows = e.viewport?.rows ?? 40
-  const hasSide = columns >= 110
+  const hasSide = columns >= SIDE_COLUMNS
   const sideWidth = hasSide ? Math.min(48, Math.floor(columns * 0.3)) : 0
   const mainWidth = hasSide ? columns - sideWidth - 3 : columns
   const minHeight = Math.max(8, rows - RESERVED_ROWS)
-  const main = Box({ key: 'main', flexDirection: 'column', width: mainWidth, children: conversation(elements, task, mainWidth, now, !hasSide) })
+  const main = Box({ key: 'main', flexDirection: 'column', width: mainWidth, children: conversation(elements, task, mainWidth, now, false) })
 
   if (!hasSide) {
-    return Box({
-      flexDirection: 'column',
-      marginTop: 1,
-      minHeight,
-      children: [main, ...(task.isDone ? outline(elements, task, mainWidth) : []), ...gitPanel(elements, mainWidth)],
-    })
+    return Box({ flexDirection: 'column', marginTop: 1, minHeight: Math.max(8, minHeight - DOCK_ROWS), children: [main] })
   }
 
   const side = [...outline(elements, task, sideWidth), ...gitPanel(elements, sideWidth)]
@@ -583,9 +580,50 @@ function page($: any, e: any, task: Task, now: number) {
   })
 }
 
+function dock(elements: any, task: Task, width: number) {
+  const { Box, Text } = elements
+  const last = task.steps[task.steps.length - 1]
+  const isRunning = Boolean(last && last.pending > 0)
+  const mark = !last ? ICON_STEPS : isRunning ? ICON_RUNNING : last.isFailed ? ICON_FAILED : ICON_DONE
+  const markColor = !last ? BLUE : isRunning ? YELLOW : last.isFailed ? RED : GREEN
+  const stepTail = ` ${plural(stepCount(task), 'step')}`
+  const stepLabel = last ? last.label : task.isDone ? 'no steps' : 'thinking'
+  const files = [...task.files.entries()].map(([path, change]) => `${basename(path)} ${formatChange(change)}`).join(', ')
+  const gitParts = git
+    ? [
+        git.upstream ? `${git.branch} → ${git.upstream}` : git.branch,
+        git.changes.length > 0 ? `${git.changes.length} changed` : 'clean',
+        git.upstream ? (git.unpushed.length > 0 ? `${git.unpushed.length} not pushed` : 'pushed') : `${git.unpushed.length} local`,
+      ]
+    : []
+  const lastCommit = git?.pushed[0] ?? git?.unpushed[0]
+  const gitText = gitParts.join(' · ') + (lastCommit ? ` · ${lastCommit.hash} ${lastCommit.subject}` : '')
+  const row = (key: string, icon: string, iconColor: string, text: string, color: string, tail = '') =>
+    Box({
+      key,
+      flexDirection: 'row',
+      columnGap: 1,
+      children: [
+        Text({ color: iconColor, children: [icon] }),
+        Text({ color, children: [clip(text, Math.max(10, width - 3 - cells(tail)))] }),
+        ...(tail ? [Text({ color: COMMENT, children: [tail.trim()] })] : []),
+      ],
+    })
+  return [
+    Text({ key: 'dock-rule', color: GUTTER, children: ['─'.repeat(Math.max(0, width))] }),
+    row('dock-step', mark, markColor, stepLabel, isRunning ? FG : FG_DARK, stepTail),
+    row('dock-files', ICON_FILES, BLUE, files || 'no files changed', files ? FG_DARK : COMMENT),
+    ...(git ? [row('dock-git', ICON_BRANCH, MAGENTA, gitText, FG_DARK)] : []),
+  ]
+}
+
 function segment(elements: any, key: string, text: string, color: string, background?: string, bold = false) {
   const { Text } = elements
   return Text({ key, color, bold, ...(background ? { backgroundColor: background } : {}), children: [text] })
+}
+
+function cells(text: string) {
+  return [...text].length
 }
 
 function statusline($: any, e: any, task: Task, now: number) {
@@ -596,6 +634,20 @@ function statusline($: any, e: any, task: Task, now: number) {
   const time = !task.isDone ? formatDuration(now - task.startedAt) : task.durationMs ? formatDuration(task.durationMs) : '—'
   const current = !task.isDone && task.steps.length > 0 ? task.steps[task.steps.length - 1].label : ''
   const change = task.files.size > 0 ? ` ${formatChange(totalChange(task))}` : ''
+  const modeText = ` ${ICON_CLAUDE} ${word} `
+  const stepsText = ` ${ICON_STEPS} ${stepCount(task)} `
+  const filesText = ` ${ICON_FILES} ${task.files.size}${change} `
+  const gitText = git ? gitSegment() : ''
+  const timeText = `${ICON_CLOCK} ${time} `
+  const taskText = ` ${tasks.indexOf(task) + 1}/${tasks.length} `
+  const endText = ` ${shortTime(now)} `
+  const rightWidth = cells(timeText + taskText + endText) + 2 + 6
+  const room = (e.props.bodyColumns ?? 80) - 4 - rightWidth - 1
+  const base = cells(modeText + stepsText) + 2
+  const showFiles = base + cells(filesText) <= room
+  const showGit = Boolean(gitText) && showFiles && base + cells(filesText + gitText) + 2 <= room
+  const used = base + (showFiles ? cells(filesText) : 0) + (showGit ? cells(gitText) + 2 : 0)
+  const currentRoom = Math.min(50, room - used - 1)
   return Box({
     key: 'statusline',
     flexDirection: 'row',
@@ -606,25 +658,27 @@ function statusline($: any, e: any, task: Task, now: number) {
       Box({
         key: 'left',
         flexDirection: 'row',
+        flexShrink: 0,
         children: [
-          segment(elements, 'mode', ` ${ICON_CLAUDE} ${word} `, BG_DARK, mode, true),
+          segment(elements, 'mode', modeText, BG_DARK, mode, true),
           segment(elements, 'mode-sep', SEP_RIGHT, mode, GUTTER),
-          segment(elements, 'steps', ` ${ICON_STEPS} ${stepCount(task)} `, BLUE, GUTTER),
+          segment(elements, 'steps', stepsText, BLUE, GUTTER),
           segment(elements, 'steps-sep', SEP_RIGHT, GUTTER),
-          segment(elements, 'files', ` ${ICON_FILES} ${task.files.size}${change} `, FG_DARK),
-          ...(git ? [segment(elements, 'git-sep', SEP_RIGHT, GUTTER), segment(elements, 'git', gitSegment(), MAGENTA, GUTTER), segment(elements, 'git-end', SEP_RIGHT, GUTTER)] : []),
-          ...(current ? [segment(elements, 'current', ` ${clip(current, 50)}`, COMMENT)] : []),
+          ...(showFiles ? [segment(elements, 'files', filesText, FG_DARK)] : []),
+          ...(showGit ? [segment(elements, 'git-sep', SEP_RIGHT, GUTTER), segment(elements, 'git', gitText, MAGENTA, GUTTER), segment(elements, 'git-end', SEP_RIGHT, GUTTER)] : []),
+          ...(current && currentRoom >= 8 ? [segment(elements, 'current', ` ${clip(current, currentRoom - 1)}`, COMMENT)] : []),
         ],
       }),
       Box({
         key: 'right',
         flexDirection: 'row',
+        flexShrink: 0,
         children: [
-          segment(elements, 'time', `${ICON_CLOCK} ${time} `, FG_DARK),
+          segment(elements, 'time', timeText, FG_DARK),
           segment(elements, 'task-sep', SEP_LEFT, GUTTER),
-          segment(elements, 'task', ` ${tasks.indexOf(task) + 1}/${tasks.length} `, BLUE, GUTTER),
+          segment(elements, 'task', taskText, BLUE, GUTTER),
           segment(elements, 'end-sep', SEP_LEFT, mode, GUTTER),
-          segment(elements, 'end', ` ${shortTime(now)} `, BG_DARK, mode, true),
+          segment(elements, 'end', endText, BG_DARK, mode, true),
           Button({ key: 'prev', label: ' ⌥↑', plain: true, dimColor: true, action: 'app:diffFileListUp', onPress: () => moveView($, -1) }),
           Button({ key: 'next', label: ' ⌥↓', plain: true, dimColor: true, action: 'app:diffFileListDown', onPress: () => moveView($, 1) }),
         ],
@@ -962,7 +1016,10 @@ export const register: Register = (on) => {
     const shown = viewedTask()
     if (!shown) return theirs
     const bar = statusline($, e, shown, await $.clock.now())
-    return theirs ? stack($, e, [bar, theirs]) : bar
+    const columns = (e.viewport?.columns ?? e.props.bodyColumns ?? 100) - 2
+    const docked = columns < SIDE_COLUMNS ? dock($.ui.resolve(e), shown, (e.props.bodyColumns ?? columns) - 4) : []
+    const rows = [...docked, bar, ...(theirs ? [theirs] : [])]
+    return rows.length > 1 ? stack($, e, rows) : bar
   })
 }
 
