@@ -191,6 +191,18 @@ async function measure($: any, input: ToolInput) {
   return changeFromInput(input, before)
 }
 
+function squash(text: string) {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function typedPrompt(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('<command-message>')) return trimmed
+  const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(trimmed)?.[1] ?? ''
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(trimmed)?.[1] ?? ''
+  return `${name} ${args}`.trim()
+}
+
 function createTask(prompt: string, startedAt: number): Task {
   return {
     id: nextId++,
@@ -261,13 +273,14 @@ function rebuild(messages: any[]) {
   messages.forEach((message, index) => {
     const text = (message.text ?? '').trim()
     if (message.role === 'user') {
-      if (!text || text.startsWith('<')) return
+      if (!text || text.startsWith('Base directory for this skill:')) return
+      if (text.startsWith('<') && !text.startsWith('<command-message>')) return
       if (message.toolResults?.length) {
         current?.followUps.push(text)
         return
       }
       finish()
-      current = createTask(text, 0)
+      current = createTask(typedPrompt(text), 0)
       current.isDone = true
       tasks.push(current)
       texts = []
@@ -332,9 +345,9 @@ function ownerOfPrompt(rowId: string, text: string) {
   if (bound) return bound
   const taken = new Set(boundRows.values())
   const newestFirst = [...tasks].reverse()
-  const match =
-    newestFirst.find((task) => task.prompt === text && !taken.has(task)) ??
-    newestFirst.find((task) => task.prompt === text)
+  const wanted = squash(typedPrompt(text))
+  const matches = (task: Task) => squash(task.prompt) === wanted
+  const match = newestFirst.find((task) => matches(task) && !taken.has(task)) ?? newestFirst.find(matches)
   if (match) boundRows.set(rowId, match)
   return match ?? null
 }
@@ -878,8 +891,9 @@ export const register: Register = (on) => {
 
   on('turn.start', async ($, e, next) => {
     if (e.text) {
-      for (const one of tasks) one.followUps = one.followUps.filter((text) => text !== e.text.trim())
-      const task = createTask(e.text, await $.clock.now())
+      const prompt = typedPrompt(e.text)
+      for (const one of tasks) one.followUps = one.followUps.filter((text) => text !== prompt)
+      const task = createTask(prompt, await $.clock.now())
       task.turnIds.add(e.turnId)
       tasks.push(task)
       viewIndex = null
