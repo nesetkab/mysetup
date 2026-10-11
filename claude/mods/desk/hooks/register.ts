@@ -195,6 +195,11 @@ function squash(text: string) {
   return text.replace(/\s+/g, ' ').trim()
 }
 
+function isTyped(text: string) {
+  const trimmed = text.trim()
+  return Boolean(trimmed) && (!trimmed.startsWith('<') || trimmed.startsWith('<command-message>'))
+}
+
 function typedPrompt(text: string) {
   const trimmed = text.trim()
   if (!trimmed.startsWith('<command-message>')) return trimmed
@@ -274,7 +279,7 @@ function rebuild(messages: any[]) {
     const text = (message.text ?? '').trim()
     if (message.role === 'user') {
       if (!text || text.startsWith('Base directory for this skill:')) return
-      if (text.startsWith('<') && !text.startsWith('<command-message>')) return
+      if (!isTyped(text)) return
       if (message.toolResults?.length) {
         current?.followUps.push(text)
         return
@@ -890,7 +895,7 @@ export const register: Register = (on) => {
   })
 
   on('turn.start', async ($, e, next) => {
-    if (e.text) {
+    if (isTyped(e.text)) {
       const prompt = typedPrompt(e.text)
       for (const one of tasks) one.followUps = one.followUps.filter((text) => text !== prompt)
       const task = createTask(prompt, await $.clock.now())
@@ -1015,7 +1020,9 @@ export const register: Register = (on) => {
   })
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
-    if (e.props.origin.kind !== 'composer' || e.props.isExpanded) return next(e)
+    if (e.props.isExpanded) return next(e)
+    if (e.props.origin.kind === 'task-notification') return hide($, e)
+    if (e.props.origin.kind !== 'composer') return next(e)
     const text = e.props.text.trim()
     const task = ownerOfPrompt(e.requestId, text)
     if (!task) return ownerOfFollowUp(text) ? hide($, e) : next(e)
