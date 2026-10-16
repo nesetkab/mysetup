@@ -9,6 +9,8 @@ My LazyVim, WezTerm and Claude Code config. Each folder is linked into place, so
 | `nvim/` | `~/.config/nvim` |
 | `wezterm/.wezterm.lua` | `~/.wezterm.lua` |
 | `claude/mods/desk/` | `~/.claude/mods/desk` |
+| `clang/.clang-format` | `~/.clang-format` |
+| `clang/config.yaml` | `~/Library/Preferences/clangd/config.yaml` |
 
 To add a new config, move it in here and point the original path at it with `ln -s`. Never edit the linked path as if it were a separate copy.
 
